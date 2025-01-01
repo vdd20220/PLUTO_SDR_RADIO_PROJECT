@@ -8,41 +8,46 @@
 #include <stdint.h>
 #include <iio.h>
 
+#define _USE_MATH_DEFINES
+#include <math.h>
 #include "my_morse.c"
 
 #include <mqtt.h>
 #include "templates/posix_sockets.h"
 
 
-#define NUM_THREADS 5
+#define NUM_THREADS 2
 #define MQTT_ADRESS "192.168.2.10"//default adress of computer conected thru ssh
 #define MQTT_PORT "1883"//default port
 
 //MQTT to subscribe
-#define MQTT_SUBSCRIBE_CNT 5
+#define MQTT_SUBSCRIBE_CNT 7
 #define MQTT_MSG_TOPIC "/message"
 #define MQTT_FREQUENCY_TX_TOPIC "/frequency/tx"
 #define MQTT_FREQUENCY_RX_TOPIC "/frequency/rx"
 #define MQTT_REFRESH_SETTINGS "/refresh"
 #define MQTT_PARIS_SPEED_SETTING "/paris_speed"
-
+#define MQTT_TONE_SETTING "/sine_tone"
+#define MQTT_SPACE_SETTING "/space_btw"
 //MQTT to publish
 #define MQTT_PUBLISH_TX_FREQ "/settings/tx"
 #define MQTT_PUBLISH_RX_FREQ "/settings/rx"
 #define MQTT_PUBLISH_PARIS_SPEED "/settings/paris_speed"
 #define MQTT_PUBLISH_DATA_OUT "/data/out"
+#define MQTT_PUBLISH_TONE "/settings/tone"
+#define MQTT_PUBLISH_SPACE "/settings/space"
 
 #define MESSAGE_MAX_LEN 500
 pthread_mutex_t mtx_data; // for accesing quit_variable betwwen functions
 
+#define KHZ(x) ((long long)(x*1000.0 + .5))
 #define MHZ(x) ((long long)(x*1000000.0 + .5))
 #define GHZ(x) ((long long)(x*1000000000.0 + .5))
 
-#define DEFAULT_TX_FREQ MHZ(442.5)
-#define DEFAULT_RX_FREQ MHZ(442.5)
+#define DEFAULT_TX_FREQ KHZ(442.5)//is actual MHZ but code multiplies by 1000 because of int32 size
+#define DEFAULT_RX_FREQ KHZ(442.5)//is actual MHZ but code multiplies by 1000 because of int32 size
 
-#define DATA_OUT_SIZE 64
-
+#define DATA_OUT_SIZE 256
 #define IIO_ENSURE(expr) { \
 	if (!(expr)) { \
 		(void) fprintf(stderr, "assertion failed (%s:%d)\n", __FILE__, __LINE__); \
@@ -211,6 +216,7 @@ void* client_refresher(void* client);
  */
 void exit_example(int status, int sockfd, pthread_t *client_daemon);
 
+
 //void send_settings(void* client,void *shared_data_pointer);
 
 // shared data structure
@@ -227,6 +233,9 @@ typedef struct {
    int transmission_speed; // paris speed in PARIS per min
    int32_t data_out[DATA_OUT_SIZE];
    bool new_data;
+   int sin_freq;
+   bool new_settings;
+   int space_betwwen_symbols;
 } data_t;
 
 void * shared_data_pointer;//used for mqtt callback
@@ -289,6 +298,23 @@ int paris_speed(int transmision_speed)//simple recalculation of paris speed to S
    return 1500000*60/50/transmision_speed;
 }
 
+int* get_sinus(int freq,int sample_speed,int* ret_len)//returns 0x7fff*e^(ikt) and lenght of arr
+{
+   int len = sample_speed/freq;
+   //printf("len %i\n",len);
+   *ret_len = len;
+   int* arr = (int*)malloc(2 * len * sizeof(int));
+
+   for(int i=0;i<len;i++)
+   {
+      arr[i]    =(int)((double)0x7fff*sin(2*M_PI*((double)i/(double)len)));
+      arr[i+len]=(int)((double)0x7fff*cos(2*M_PI*((double)i/(double)len)));
+      //printf("%i %i\n",arr[i],arr[i+len]);
+   }
+   return arr;
+
+
+}
 void* keybord_input_thread(void* d)
 {data_t *data = (data_t*)d;
    while(1)
@@ -314,9 +340,11 @@ void* mqtt_thread(void* d)
                         MQTT_FREQUENCY_RX_TOPIC,
                         MQTT_FREQUENCY_TX_TOPIC,
                         MQTT_REFRESH_SETTINGS,
-                        MQTT_PARIS_SPEED_SETTING};
+                        MQTT_PARIS_SPEED_SETTING,
+                        MQTT_TONE_SETTING,
+                        MQTT_SPACE_SETTING};
 
-   fprintf(stderr, "\x1b[34mINFO\x1b[0m: 2");
+   //fprintf(stderr, "\x1b[34mINFO\x1b[0m: 2");
    // open the non-blocking TCP socket (connecting to the broker)
    int sockfd = open_nb_socket(addr, port);
 
@@ -342,7 +370,7 @@ void* mqtt_thread(void* d)
       fprintf(stderr, "error: %s\n", mqtt_error_str(client.error));
       exit_example(EXIT_FAILURE, sockfd, NULL);
    }
-   fprintf(stderr, "\x1b[34mINFO\x1b[0m: 3");
+   //fprintf(stderr, "\x1b[34mINFO\x1b[0m: 3");
    // start a thread to refresh the client (handle egress and ingree client traffic) 
    pthread_t client_daemon;
    if(pthread_create(&client_daemon, NULL, client_refresher, &client)) {
@@ -415,18 +443,24 @@ void* mqtt_thread(void* d)
          char s_tx[20];
          char s_rx[20];
          char s_speed[20];
+         char s_tone[20];
+         char s_space[20];
          pthread_mutex_lock(&mtx_data);
          data->refresh = false; //just reset it here
          
          itoa(data->frequncy_rx, s_rx, 10);
          itoa(data->frequncy_tx, s_tx, 10);
          itoa(data->transmission_speed, s_speed , 10);
+         itoa(data->sin_freq, s_tone , 10);
+         itoa(data->space_betwwen_symbols, s_space , 10);
          pthread_mutex_unlock(&mtx_data); 
          mqtt_publish(&client, MQTT_PUBLISH_TX_FREQ, s_tx, strlen(s_tx) + 1, MQTT_PUBLISH_QOS_0);
 
          mqtt_publish(&client, MQTT_PUBLISH_RX_FREQ, s_rx, strlen(s_rx) + 1, MQTT_PUBLISH_QOS_0);
          mqtt_publish(&client, MQTT_PUBLISH_PARIS_SPEED, s_speed, strlen(s_speed) + 1, MQTT_PUBLISH_QOS_0);
-         printf("publish settings\n");
+         mqtt_publish(&client, MQTT_PUBLISH_TONE, s_tone, strlen(s_tone) + 1, MQTT_PUBLISH_QOS_0);
+         mqtt_publish(&client, MQTT_PUBLISH_SPACE, s_space, strlen(s_space) + 1, MQTT_PUBLISH_QOS_0);
+         printf("\x1b[34mINFO\x1b[0m published settings\n");
       }  
         
       usleep(1000*10);//sleep for 10ms
@@ -469,16 +503,16 @@ void* transmit_thread(void* d)
    // Listen to ctrl+c and IIO_ENSURE
 	signal(SIGINT, handle_sig);
 
-   // RX default stream config
+    // RX default stream config
 	rxcfg.bw_hz = MHZ(2);   // 2 MHz rf bandwidth
 	rxcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s rx sample rate
-	rxcfg.lo_hz = DEFAULT_RX_FREQ; // 2.5 GHz rf frequency
+	rxcfg.lo_hz = 1000*DEFAULT_RX_FREQ; // 2.5 GHz rf frequency
 	rxcfg.rfport = "A_BALANCED"; // port A (select for rf freq.)
 
    // TX stream config
 	txcfg.bw_hz = MHZ(1.5); // 1.5 MHz rf bandwidth
 	txcfg.fs_hz = MHZ(2.5);   // 2.5 MS/s tx sample rate
-	txcfg.lo_hz = DEFAULT_TX_FREQ; // 2.5 GHz rf frequency
+	txcfg.lo_hz = 1000*DEFAULT_TX_FREQ; // 2.5 GHz rf frequency
 	txcfg.rfport = "A"; // port A (select for rf freq.)
 
    
@@ -529,11 +563,16 @@ void* transmit_thread(void* d)
    data->frequncy_rx=DEFAULT_RX_FREQ;
    data->frequncy_tx=DEFAULT_TX_FREQ;
    int symbol_len=paris_speed(data->transmission_speed);
+   int sinus_freq = data->sin_freq;
 
    pthread_mutex_unlock(&mtx_data);
+   int sinus_len;
+   int *sinus = get_sinus(sinus_freq,1500000,&sinus_len);
+
 
    int symbol_counter = 0;//counts symbols used for managing sending of messages since end of symbols does not align with buffer lenghts.
 	int counter = 0; // count samples
+   int sinus_counter =0;//couns sinus wave samples
    bool no_tx_msg = true;//indicates if NO message is present
    int* bin_msg;//
    int binary_lenght=0;
@@ -544,18 +583,31 @@ void* transmit_thread(void* d)
          pthread_mutex_lock(&mtx_data);
          quit = data->quit;
          bool new_message = data->new_message;
-         symbol_len = paris_speed(data->transmission_speed); // instead of checking for change its quicker to just recalculete once per message
-
+         
+         bool new_setting = data->new_settings;
          if(new_message == true)
            {
             memcpy(&message,&data->message,data->message_lenght);
             no_tx_msg = false;
-            bin_msg = morse_output(message,strlen(message),&binary_lenght);//get new message
+            bin_msg = morse_output(message,strlen(message),&binary_lenght,data->space_betwwen_symbols);//get new message
            }
          
          data->new_message = false;//data has been saved from shared struct so next message can be recieved
-         pthread_mutex_unlock(&mtx_data);
          
+         if(new_setting)
+         {
+                txcfg.lo_hz=1000*data->frequncy_tx;
+                rxcfg.lo_hz=1000*data->frequncy_rx;
+                fprintf(stderr,"\x1b[34mINFO\x1b[0m Reconfiguring AD9361\n");
+                IIO_ENSURE(cfg_ad9361_streaming_ch(&rxcfg, RX, 0) && "RX port 0 not found");
+                IIO_ENSURE(cfg_ad9361_streaming_ch(&txcfg, TX, 0) && "TX port 0 not found");
+                symbol_len=paris_speed(data->transmission_speed);
+                free(sinus);
+                int *sinus = get_sinus(data->sin_freq,1500000,&sinus_len);
+                data->new_settings = false;
+               
+         }
+         pthread_mutex_unlock(&mtx_data);
          
       }
 		ssize_t nbytes_rx, nbytes_tx;
@@ -610,15 +662,18 @@ void* transmit_thread(void* d)
 			
 
             // https://wiki.analog.com/resources/eval/user-guides/ad-fmcomms2-ebz/software/basic_iq_datafiles#binary_format
-            ((int16_t*)p_dat)[0] = (bin_msg[symbol_counter] * 0x7ff) << 4;//real[counter]; // Real (I)
-            ((int16_t*)p_dat)[1] = (bin_msg[symbol_counter] * 0x7ff) << 4;//imag[counter]; // Imag (Q)
+            ((int16_t*)p_dat)[0] = (bin_msg[symbol_counter] * sinus[sinus_counter]) << 4;//real[counter]; // Real (I)
+            ((int16_t*)p_dat)[1] = (bin_msg[symbol_counter] * sinus[sinus_len+sinus_counter]) << 4;//imag[counter]; // Imag (Q)
             counter++;
+            sinus_counter++;
             if(counter>=symbol_len)
             {
                counter=0;
                if(symbol_counter<binary_lenght)
                   symbol_counter++;
-            }	
+            }
+            if(sinus_counter>=sinus_len)
+               sinus_counter=0;	
 		}
 		
       if((symbol_counter==binary_lenght)&&(symbol_counter>0))
@@ -655,6 +710,7 @@ void* transmit_thread(void* d)
 
 
    }
+   free(sinus);
    return 0;
 }
 
@@ -680,11 +736,19 @@ void* recieve_thread(void* d)
 
 int main() {
 
-   const char *threads_names[] = { "INPUT", "MQTT","WEBSCRAPE","TRANSMIT","RECIEVE" };
+   const char *threads_names[] = {"MQTT","TX/RX" };
  
-   void* (*thr_functions[])(void*) = { keybord_input_thread,mqtt_thread,webscrape_thread,transmit_thread,recieve_thread};
+   void* (*thr_functions[])(void*) = { mqtt_thread,transmit_thread};
  
-   data_t data = { .quit = false , .message_lenght = 0 , .new_message=false, .client_rdy=false, .transmission_speed=30};
+   data_t data = { .quit = false ,
+                   .message_lenght = 0 , 
+                   .new_message=false, 
+                   .client_rdy=false, 
+                   .transmission_speed=30, 
+                   .sin_freq = 800, 
+                   .new_settings=false,
+                   .space_betwwen_symbols=3};
+
    pthread_t threads[NUM_THREADS];
    shared_data_pointer = &data;
    pthread_mutex_init(&mtx_data, NULL);
@@ -696,21 +760,28 @@ int main() {
       fprintf(stderr, "\x1b[34mINFO\x1b[0m: Create thread '%s' %s\n", threads_names[i], ( r == 0 ? "OK" : "FAIL") );
    }
 
-   //printf("heloo?");
-   char str[] = "EEEE EEEE";
+   printf("heloo?");
+   char str[] = "PARIS PARIS";
    int len = strlen(str);
    printf("%i",len);
    int binary_lenght;
-   int* bin_msg = morse_output(str,strlen(str),&binary_lenght);
+   int* bin_msg = morse_output(str,strlen(str),&binary_lenght,3);
 
    for(int i=0;i<binary_lenght;i++)
       printf("%i",bin_msg[i]);
    free(bin_msg);
+   //int len;
+   //int *e = get_sinus(16,1024,&len);
+   //printf("len:%i\n",len);
+   //for(int i=0;i<len;i++)
+   //   printf("real:%i img %i\n",e[i],e[i+len]); 
    
-    fprintf(stderr,"Press CTRL-D to exit.\n\n");
+   //free(e);
+
+   fprintf(stderr,"\x1b[34mINFO\x1b[0m: Press CTRL-D to exit.\n\n");
 
     /* block */
-    while(fgetc(stdin) != EOF);
+   while(fgetc(stdin) != EOF);
 
 
    pthread_mutex_lock(&mtx_data);
@@ -777,14 +848,16 @@ void publish_callback(void** unused, struct mqtt_response_publish *published)
    {
       pthread_mutex_lock(&mtx_data);
       //printf("MQTT_FREQUENCY_TX_TOPIC , %i\n",atoi(application_message));
-      data->frequncy_tx = atoi(application_message);
+      data->frequncy_tx =(long long) atoi(application_message);
+      data->new_settings = true;
       pthread_mutex_unlock(&mtx_data);    
    }   
    else if (strcmp(topic_name,MQTT_FREQUENCY_RX_TOPIC)==0)
    {
       pthread_mutex_lock(&mtx_data);
       //printf("MQTT_FREQUENCY_RX_TOPIC , %i\n",atoi(application_message));
-      data->frequncy_rx = atoi(application_message);
+      data->frequncy_rx = (long long) atoi(application_message);
+      data->new_settings = true;
       pthread_mutex_unlock(&mtx_data);    
    }
    //copy message to shared data struct
@@ -793,6 +866,7 @@ void publish_callback(void** unused, struct mqtt_response_publish *published)
       pthread_mutex_lock(&mtx_data);
       //printf("MQTT_FREQUENCY_RX_TOPIC , %i\n",atoi(application_message));
       data->refresh = true;
+      
       pthread_mutex_unlock(&mtx_data);    
    }
    else if (strcmp(topic_name,MQTT_PARIS_SPEED_SETTING)==0)
@@ -800,6 +874,22 @@ void publish_callback(void** unused, struct mqtt_response_publish *published)
       pthread_mutex_lock(&mtx_data);
       //printf("MQTT_FREQUENCY_RX_TOPIC , %i\n",atoi(application_message));
       data->transmission_speed = atoi(application_message);
+      data->new_settings = true;
+      pthread_mutex_unlock(&mtx_data);    
+   }
+   else if (strcmp(topic_name,MQTT_TONE_SETTING)==0)
+   {
+      pthread_mutex_lock(&mtx_data);
+      //printf("MQTT_FREQUENCY_RX_TOPIC , %i\n",atoi(application_message));
+      data->sin_freq = atoi(application_message);
+      data->new_settings = true;
+      pthread_mutex_unlock(&mtx_data);    
+   }
+   else if (strcmp(topic_name,MQTT_SPACE_SETTING)==0)
+   {
+      pthread_mutex_lock(&mtx_data);
+      //printf("MQTT_FREQUENCY_RX_TOPIC , %i\n",atoi(application_message));
+      data->space_betwwen_symbols = atoi(application_message);
       pthread_mutex_unlock(&mtx_data);    
    }
    free(topic_name);
