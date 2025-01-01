@@ -2,7 +2,7 @@ const labels = [0,1,2,3,4,5,6,8];
 let data = {
 labels: labels,
 datasets: [{
-    label: 'My First Dataset',
+    label: 'signal',
     data: [65, 59, 80, 81, 56, 55, 40,45],
     fill: false,
     borderColor: 'rgb(75, 192, 192)',
@@ -56,10 +56,18 @@ function onMessageArrived(message){
         document.getElementById("set_paris_speed").innerHTML=message.payloadString;
         document.getElementById("messages").innerHTML += "<span> Topic:"+message.destinationName+" | Message : "+message.payloadString + "</span><br>";
     }
+    if(message.destinationName=="/settings/tone"){
+        document.getElementById("set_tone_freq").innerHTML=message.payloadString;
+        document.getElementById("messages").innerHTML += "<span> Topic:"+message.destinationName+" | Message : "+message.payloadString + "</span><br>";
+    }
+    if(message.destinationName=="/settings/space"){
+        document.getElementById("set_space").innerHTML=message.payloadString;
+        document.getElementById("messages").innerHTML += "<span> Topic:"+message.destinationName+" | Message : "+message.payloadString + "</span><br>";
+    }
     if(message.destinationName=="/data/out"){
         document.getElementById("messages").innerHTML += "<span> Topic:"+message.destinationName + "</span><br>";
         var arr = [];
-        for(let i=0;i<64;i++){
+        for(let i=0;i<256;i++){
             
             console.log(message.payloadString.slice(5*i,5*i+5).charCodeAt(1));
             var num = (message.payloadString.slice(5*i,5*i+5).charCodeAt(1)-48)*1000+(message.payloadString.slice(5*i,5*i+5).charCodeAt(2)-48)*100+(message.payloadString.slice(5*i,5*i+5).charCodeAt(3)-48)*10+message.payloadString.slice(5*i,5*i+5).charCodeAt(4)-48;
@@ -75,7 +83,7 @@ function onMessageArrived(message){
         console.log(arr);
         
         var new_data = [];
-        for(let i=0;i<64;i++){
+        for(let i=0;i<256;i++){
 
             new_data.push(i+1);
         }
@@ -130,6 +138,22 @@ function send_refresh(){
     client.send(Message);
     document.getElementById("messages").innerHTML += "<span> Message to topic "+topic+" is sent </span><br>";
 
+}
+function send_tone_freq(){
+    msg = document.getElementById("tone_freq").value.toString();
+    topic = "/sine_tone"
+    Message = new Paho.Message(msg);
+    Message.destinationName = topic;
+    client.send(Message);
+    document.getElementById("messages").innerHTML += "<span> Message to topic "+topic+" is sent </span><br>";
+}
+function send_space(){
+    msg = document.getElementById("space").value.toString();
+    topic = "/space_btw"
+    Message = new Paho.Message(msg);
+    Message.destinationName = topic;
+    client.send(Message);
+    document.getElementById("messages").innerHTML += "<span> Message to topic "+topic+" is sent </span><br>";
 }
 function send_message(){
     msg = document.getElementById("my_message").value.toString().toUpperCase();
