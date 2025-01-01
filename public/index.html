@@ -25,26 +25,43 @@
         </tr>
         <tr>
             <td>tx frequency:</td>
-            <td><input type="number" id="frequencytx" name="frequencytx" value="442500000"></td>
+            <td><input type="number" id="frequencytx" name="frequencytx" value="442500"></td>
             <td><button onclick="send_tx()">set</button></td>
             <td><label id="set_frequency_tx">N/A</label></td>
-            <td>Hz</td>
+            <td>KHz</td>
             
         </tr>
         <tr>
             <td>rx frequency:</td>
-            <td><input type="number" id="frequencyrx" name="frequencyrx" value="442500000"></td>
+            <td><input type="number" id="frequencyrx" name="frequencyrx" value="442500"></td>
             <td><button onclick="send_rx()">set</button></td>
             <td><label id="set_frequency_rx">N/A</label></td>
+            <td>KHz</td>
+            
+        </tr>
+
+        <tr>
+            <td>Paris speed:</td>
+            <td><input type="number" id="paris_speed" name="paris_speed" value="30" min="5" max="60"></td>
+            <td><button onclick="send_paris_speed()">set</button></td>
+            <td><label id="set_paris_speed">N/A</label></td>
+            <td>PARIS/min</td>
+            
+        </tr>      
+          <tr>
+            <td>Tone frequency</td>
+            <td><input type="number" id="tone_freq" name="tone_freq" value="800" min="800" max="2000"></td>
+            <td><button onclick="send_tone_freq()">set</button></td>
+            <td><label id="set_tone_freq">N/A</label></td>
             <td>Hz</td>
             
         </tr>
         <tr>
-            <td>Paris speed:</td>
-            <td><input type="number" id="paris_speed" name="paris_speed" value="30"></td>
-            <td><button onclick="send_paris_speed()">set</button></td>
-            <td><label id="set_paris_speed">N/A</label></td>
-            <td>PARIS/min</td>
+            <td>space between letters</td>
+            <td><input type="number" id="space" name="space" value="3" min="3" max="60"></td>
+            <td><button onclick="send_space()">set</button></td>
+            <td><label id="set_space">N/A</label></td>
+            <td>dots betwwen symbols</td>
             
         </tr>
         <tr>
