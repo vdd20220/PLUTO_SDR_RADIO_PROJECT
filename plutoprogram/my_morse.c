@@ -26,10 +26,10 @@ int* str_to_morse_arr(char *message,int len)
 
 }
 
-int get_morse_character_len(int character)
+int get_morse_character_len(int character,int space)
 {   
     if(character==0)//is space
-        return 7;
+        return space+4;
     
     int char_len = 0;
     while (character>0)//is decodable
@@ -37,16 +37,16 @@ int get_morse_character_len(int character)
         char_len = char_len + character % 10 + 1;//space between . and -
         character = character / 10;
     }
-    return char_len + 2;//+3 for space between symbols-1 for oalready added
+    return char_len + space + 1;//+3 for space between symbols-1 for oalready added
 }
 
-int* morse_output(char *message,int len,int* binary_len)
+int* morse_output(char *message,int len,int* binary_len,int space_btw_sym)
 {   printf("%i",len);
     int* msg = str_to_morse_arr(message,len);
     int message_lenght = 0;
     for(int i=0;i<len;i++)  //count message lenght for memory allocation
-        {message_lenght=message_lenght+get_morse_character_len(msg[i]);
-        printf("%i add:%i total:%i\n",msg[i],get_morse_character_len(msg[i]),message_lenght);    
+        {message_lenght=message_lenght+get_morse_character_len(msg[i],space_btw_sym);
+        printf("%i add:%i total:%i\n",msg[i],get_morse_character_len(msg[i],space_btw_sym),message_lenght);    
         }
     *binary_len = message_lenght; 
     
@@ -63,9 +63,9 @@ int* morse_output(char *message,int len,int* binary_len)
         printf("pos:%i , symbol:%i",write_pos,msg[i]);
         if(msg[i]==0)//is space
             {if(!was_space)
-                write_pos = write_pos+SPACE_LENGHT-3;
+                write_pos = write_pos+space_btw_sym+1;
              else
-                write_pos = write_pos+SPACE_LENGHT;
+                write_pos = write_pos+space_btw_sym+4;
             was_space = 1;
             continue;}
         
